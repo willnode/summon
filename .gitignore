@@ -1,2 +1,6 @@
-ngx_devel_kit
 nginx-*
+openssl-*
+pcre2-*
+zlib-*
+zig-out
+zig-cache
