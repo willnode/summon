@@ -11,11 +11,11 @@ export fn ngx_http_summon_handler(r: *c.ngx_http_request_t) callconv(.C) c.ngx_i
     const response_len: u32 = 12;
 
     // Set the Content-Type header
-    _ = c.ngx_http_discard_request_body(r);
-    r.headers_out.content_type_len = c.ngx_string("text/plain").len;
-    r.headers_out.content_type = c.ngx_string("text/plain");
-    r.headers_out.status = c.NGX_HTTP_OK;
-    r.headers_out.content_length_n = response_len;
+    // _ = c.ngx_http_discard_request_body(r);
+    // r.headers_out.content_type_len = c.ngx_string("text/plain").len;
+    // r.headers_out.content_type = c.ngx_string("text/plain");
+    // r.headers_out.status = c.NGX_HTTP_OK;
+    // r.headers_out.content_length_n = response_len;
 
     // Send the headers of your response
     _ = c.ngx_http_send_header(r);
