@@ -1,2 +1,5 @@
-ngx_devel_kit
 nginx-*
+openssl-*
+pcre2-*
+zlib-*
+/target
