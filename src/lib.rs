@@ -8,7 +8,10 @@ use types::*;
 use lazy_static::lazy_static;
 use ngx::core::NgxStr;
 use ngx::ffi::{
-    nginx_version, ngx_array_push, ngx_conf_t, ngx_http_add_variable, ngx_http_core_module, ngx_http_handler_pt, ngx_http_module_t, ngx_http_phases_NGX_HTTP_ACCESS_PHASE, ngx_http_request_t, ngx_http_variable_t, ngx_int_t, ngx_module_t, ngx_uint_t, ngx_variable_value_t, NGX_DECLINED, NGX_HTTP_MODULE, NGX_OK, NGX_RS_MODULE_SIGNATURE
+    nginx_version, ngx_array_push, ngx_conf_t, ngx_http_add_variable, ngx_http_core_module,
+    ngx_http_handler_pt, ngx_http_module_t, ngx_http_phases_NGX_HTTP_ACCESS_PHASE,
+    ngx_http_request_t, ngx_http_variable_t, ngx_int_t, ngx_module_t, ngx_uint_t,
+    ngx_variable_value_t, NGX_DECLINED, NGX_HTTP_MODULE, NGX_OK, NGX_RS_MODULE_SIGNATURE,
 };
 use ngx::http::{MergeConfigError, Request};
 use ngx::{core, core::Status, http, http::HTTPModule};
@@ -155,11 +158,18 @@ fn get_or_spawn_process(request: &http::Request, co: &ModuleConfig) -> u32 {
     }
 
     // Command to run should be adjusted according to your actual command.
-    let child = Command::new("sh")
-        .args(&["-c", &co.command])
-        .env("PORT", port.to_string())
-        .spawn()
-        .expect("Failed to spawn process");
+    let mut childp = Command::new("/bin/bash");
+
+    let fcmd = format!("source /etc/profile ; source ~/.profile ; {}", co.command);
+
+    childp
+        .args(&["-c", &fcmd])
+        .env("HOME", format!("/home/{}", co.user))
+    .env("PORT", port.to_string());
+
+    ngx_log_debug_http!(request, "env cmd: {:#?}", fcmd);
+
+    let child = childp.spawn().expect("Failed to spawn process");
 
     unsafe {
         (*new_ctx).save(child.id(), port, &mut request.pool());
