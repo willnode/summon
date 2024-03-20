@@ -48,6 +48,8 @@ nginx-install: nginx-${NGINX_VERSION} openssl-${OPENSSL_VERSION} pcre2-${PCRE2_V
 	"--with-ld-opt=-Wl,-Bsymbolic-functions -Wl,-z,relro -Wl,-z,now -Wl,--as-needed -pie" \
 	&& make install
 	mkdir -p nginx-install/modules
+	rm -rf nginx-install/html
+	ln -s $(shell pwd)/test/html ./nginx-install/html
 
 nginx-${NGINX_VERSION}:
 	wget http://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz

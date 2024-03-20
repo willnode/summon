@@ -2,36 +2,54 @@ mod prop;
 mod types;
 
 use prop::*;
+use sysinfo::System;
 use types::*;
 
+use lazy_static::lazy_static;
 use ngx::core::NgxStr;
 use ngx::ffi::{
-    nginx_version, ngx_array_push, ngx_command_t, ngx_conf_t, ngx_http_core_module, ngx_http_handler_pt,
-    ngx_http_module_t, ngx_http_phases_NGX_HTTP_ACCESS_PHASE, ngx_http_request_t, ngx_int_t, ngx_module_t, ngx_str_t,
-    ngx_uint_t, NGX_CONF_TAKE1, NGX_HTTP_LOC_CONF, NGX_HTTP_MODULE, NGX_RS_HTTP_LOC_CONF_OFFSET,
-    NGX_RS_MODULE_SIGNATURE,
+    nginx_version, ngx_array_push, ngx_conf_t, ngx_http_add_variable, ngx_http_core_module, ngx_http_handler_pt, ngx_http_module_t, ngx_http_phases_NGX_HTTP_ACCESS_PHASE, ngx_http_request_t, ngx_http_variable_t, ngx_int_t, ngx_module_t, ngx_uint_t, ngx_variable_value_t, NGX_DECLINED, NGX_HTTP_MODULE, NGX_OK, NGX_RS_MODULE_SIGNATURE
 };
 use ngx::http::{MergeConfigError, Request};
 use ngx::{core, core::Status, http, http::HTTPModule};
-use ngx::{http_request_handler, ngx_log_debug_http, ngx_modules, ngx_null_command, ngx_string};
+use ngx::{
+    http_request_handler, http_variable_get, ngx_http_null_variable, ngx_log_debug_http,
+    ngx_modules, ngx_string,
+};
 use std::collections::HashMap;
+use std::env;
+use std::net::{SocketAddr, TcpListener};
 use std::os::raw::{c_char, c_void};
 use std::process::{Child, Command};
 use std::sync::{Arc, Mutex};
-use lazy_static::lazy_static;
-use std::env;
-
 
 impl http::HTTPModule for Module {
     type MainConf = ();
     type SrvConf = ();
     type LocConf = ModuleConfig;
 
+    // static ngx_int_t ngx_http_orig_dst_add_variables(ngx_conf_t *cf)
+    unsafe extern "C" fn preconfiguration(cf: *mut ngx_conf_t) -> ngx_int_t {
+        for mut v in ngx_http_summonapp_vars {
+            if v.name.len == 0 {
+                break;
+            }
+            let var = ngx_http_add_variable(cf, &mut v.name, v.flags);
+            if var.is_null() {
+                return core::Status::NGX_ERROR.into();
+            }
+            (*var).get_handler = v.get_handler;
+            (*var).data = v.data;
+        }
+        core::Status::NGX_OK.into()
+    }
+
     unsafe extern "C" fn postconfiguration(cf: *mut ngx_conf_t) -> ngx_int_t {
         let cmcf = http::ngx_http_conf_get_module_main_conf(cf, &ngx_http_core_module);
 
-        let h = ngx_array_push(&mut (*cmcf).phases[ngx_http_phases_NGX_HTTP_ACCESS_PHASE as usize].handlers)
-            as *mut ngx_http_handler_pt;
+        let h = ngx_array_push(
+            &mut (*cmcf).phases[ngx_http_phases_NGX_HTTP_ACCESS_PHASE as usize].handlers,
+        ) as *mut ngx_http_handler_pt;
         if h.is_null() {
             return core::Status::NGX_ERROR.into();
         }
@@ -43,75 +61,6 @@ impl http::HTTPModule for Module {
         core::Status::NGX_OK.into()
     }
 }
-
-#[no_mangle]
-static mut ngx_http_summonapp_commands: [ngx_command_t; 9] = [
-    ngx_command_t {
-        name: ngx_string!("summon_app_command"),
-        type_: (NGX_HTTP_LOC_CONF | NGX_CONF_TAKE1) as ngx_uint_t,
-        set: Some(ngx_http_summon_app_set_command),
-        conf: NGX_RS_HTTP_LOC_CONF_OFFSET,
-        offset: 0,
-        post: std::ptr::null_mut(),
-    },
-    ngx_command_t {
-        name: ngx_string!("summon_app_root"),
-        type_: (NGX_HTTP_LOC_CONF | NGX_CONF_TAKE1) as ngx_uint_t,
-        set: Some(ngx_http_summon_app_set_root),
-        conf: NGX_RS_HTTP_LOC_CONF_OFFSET,
-        offset: 0,
-        post: std::ptr::null_mut(),
-    },
-    ngx_command_t {
-        name: ngx_string!("summon_app_user"),
-        type_: (NGX_HTTP_LOC_CONF | NGX_CONF_TAKE1) as ngx_uint_t,
-        set: Some(ngx_http_summon_app_set_user),
-        conf: NGX_RS_HTTP_LOC_CONF_OFFSET,
-        offset: 0,
-        post: std::ptr::null_mut(),
-    },
-    ngx_command_t {
-        name: ngx_string!("summon_app_log"),
-        type_: (NGX_HTTP_LOC_CONF | NGX_CONF_TAKE1) as ngx_uint_t,
-        set: Some(ngx_http_summon_app_set_log),
-        conf: NGX_RS_HTTP_LOC_CONF_OFFSET,
-        offset: 0,
-        post: std::ptr::null_mut(),
-    },
-    ngx_command_t {
-        name: ngx_string!("summon_app_idle_timeout"),
-        type_: (NGX_HTTP_LOC_CONF | NGX_CONF_TAKE1) as ngx_uint_t,
-        set: Some(ngx_http_summon_app_set_idle_timeout),
-        conf: NGX_RS_HTTP_LOC_CONF_OFFSET,
-        offset: 0,
-        post: std::ptr::null_mut(),
-    },
-    ngx_command_t {
-        name: ngx_string!("summon_app_min_instance"),
-        type_: (NGX_HTTP_LOC_CONF | NGX_CONF_TAKE1) as ngx_uint_t,
-        set: Some(ngx_http_summon_app_set_min_instance),
-        conf: NGX_RS_HTTP_LOC_CONF_OFFSET,
-        offset: 0,
-        post: std::ptr::null_mut(),
-    },
-    ngx_command_t {
-        name: ngx_string!("summon_app_use_port"),
-        type_: (NGX_HTTP_LOC_CONF | NGX_CONF_TAKE1) as ngx_uint_t,
-        set: Some(ngx_http_summon_app_set_use_port),
-        conf: NGX_RS_HTTP_LOC_CONF_OFFSET,
-        offset: 0,
-        post: std::ptr::null_mut(),
-    },
-    ngx_command_t {
-        name: ngx_string!("summon_app_show_crash"),
-        type_: (NGX_HTTP_LOC_CONF | NGX_CONF_TAKE1) as ngx_uint_t,
-        set: Some(ngx_http_summon_app_set_show_crash),
-        conf: NGX_RS_HTTP_LOC_CONF_OFFSET,
-        offset: 0,
-        post: std::ptr::null_mut(),
-    },
-    ngx_null_command!(),
-];
 
 #[no_mangle]
 static ngx_http_summonapp_module_ctx: ngx_http_module_t = ngx_http_module_t {
@@ -160,53 +109,107 @@ pub static mut ngx_http_summonapp_module: ngx_module_t = ngx_module_t {
 };
 
 impl http::Merge for ModuleConfig {
-    fn merge(&mut self, prev: &ModuleConfig) -> Result<(), MergeConfigError> {
+    fn merge(&mut self, _prev: &ModuleConfig) -> Result<(), MergeConfigError> {
         Ok(())
     }
 }
 
 pub fn get_host(request: &Request) -> Option<&NgxStr> {
     if !request.get_inner().headers_in.user_agent.is_null() {
-        unsafe { Some(NgxStr::from_ngx_str((*request.get_inner().headers_in.host).value)) }
+        unsafe {
+            Some(NgxStr::from_ngx_str(
+                (*request.get_inner().headers_in.host).value,
+            ))
+        }
     } else {
         None
     }
 }
 
 lazy_static! {
-    static ref GLOBAL_PROCESSES: Mutex<HashMap<String, Arc<Mutex<Child>>>> = Mutex::new(HashMap::new());
+    static ref GLOBAL_PROCESSES: Mutex<HashMap<String, Arc<Mutex<Child>>>> =
+        Mutex::new(HashMap::new());
 }
 
-fn get_or_spawn_process(host: &str, command: &str) -> Arc<Mutex<Child>> {
-    let mut processes = GLOBAL_PROCESSES.lock().unwrap();
-    if let Some(process) = processes.get(host) {
-        let mut process_guard = process.lock().unwrap();
-        if process_guard.try_wait().ok().flatten().is_none() {
-            // Process is still running.
-            return process.clone();
+fn is_process_running(d: sysinfo::Pid) -> bool {
+    let mut system = System::new_all();
+    system.refresh_all();
+
+    system.process(d).is_some()
+}
+
+fn get_or_spawn_process(request: &http::Request, co: &ModuleConfig) -> u32 {
+    if let Some(ctx) = unsafe { request.get_module_ctx::<ModuleCtx>(&ngx_http_summonapp_module) } {
+        if is_process_running(ctx.pid.into()) {
+            return NGX_OK;
         }
-        // If process exited, it will fall through to spawning a new one.
+    }
+
+    let port = find_free_port().expect("Unable to get free port");
+    ngx_log_debug_http!(request, "spawning at port {}: '{}'", port, co.command);
+
+    let new_ctx = request.pool().allocate::<ModuleCtx>(Default::default());
+
+    if new_ctx.is_null() {
+        return NGX_OK;
     }
 
     // Command to run should be adjusted according to your actual command.
-    let child = Command::new("cmd")
-        .args(&["-c", command])
+    let child = Command::new("sh")
+        .args(&["-c", &co.command])
+        .env("PORT", port.to_string())
         .spawn()
         .expect("Failed to spawn process");
 
-    let child_arc = Arc::new(Mutex::new(child));
-    processes.insert(host.to_string(), child_arc.clone());
-    child_arc
+    unsafe {
+        (*new_ctx).save(child.id(), port, &mut request.pool());
+        request.set_module_ctx(new_ctx as *mut c_void, &ngx_http_summonapp_module);
+    };
+    NGX_OK
 }
 
 http_request_handler!(summon_app_access_handler, |request: &mut http::Request| {
     let co = unsafe { request.get_module_loc_conf::<ModuleConfig>(&ngx_http_summonapp_module) };
     let co = co.expect("module config is none");
-    if let Some(host) =get_host(&request) {
-        if let Ok(host_str) = host.to_str() {
-            get_or_spawn_process(host_str, &co.command);
-        }
-    }
+    get_or_spawn_process(request, co);
 
-    core::Status::NGX_DECLINED
+    core::Status::NGX_DONE
 });
+
+#[no_mangle]
+static mut ngx_http_summonapp_vars: [ngx_http_variable_t; 2] = [
+    ngx_http_variable_t {
+        name: ngx_string!("summon_port"),
+        set_handler: None,
+        get_handler: Some(ngx_http_summonapp_port_variable),
+        data: 0,
+        flags: 0,
+        index: 0,
+    },
+    ngx_http_null_variable!(),
+];
+
+http_variable_get!(
+    ngx_http_summonapp_port_variable,
+    |request: &mut http::Request, v: *mut ngx_variable_value_t, _: usize| {
+        let ctx = unsafe { request.get_module_ctx::<ModuleCtx>(&ngx_http_summonapp_module) };
+
+        if let Some(obj) = ctx {
+            ngx_log_debug_http!(request, "httporigdst: found context and binding variable");
+            obj.bind_port(v);
+            return core::Status::NGX_OK;
+        }
+        core::Status::NGX_OK
+    }
+);
+
+fn find_free_port() -> Result<u16, std::io::Error> {
+    // Bind to port 0; the OS will assign a free port
+    let listener = TcpListener::bind("127.0.0.1:0")?;
+
+    // Retrieve the assigned port
+    match listener.local_addr()? {
+        SocketAddr::V4(addr) => Ok(addr.port()),
+        SocketAddr::V6(addr) => Ok(addr.port()),
+    }
+}

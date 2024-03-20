@@ -6,6 +6,8 @@ edition = "2021"
 [dependencies]
 lazy_static = "1.4.0"
 ngx = "0.5.0"
+sysinfo = "*"
+libc = "0.2.140"
 
 [lib]
 name = "summonapp"
