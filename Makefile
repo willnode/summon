@@ -9,20 +9,43 @@ build:
 	OPENSSL_VERSION=${OPENSSL_VERSION} \
 	NGX_VERSION=${NGINX_VERSION} \
 	ZLIB_VERSION=${ZLIB_VERSION} \
-	cargo build --release
-	cp target/release/libsummon.so nginx-install/modules/libsummon.so
+	cargo build
+	cp target/debug/libsummon.so nginx-install/modules/libsummon.so
 
 .PHONY: test
-test:
-	cd ./nginx-install && ./sbin/nginx -V
+test: nginx-install
+	cp ./test/nginx.conf ./nginx-install/conf/nginx.conf
 	cd ./nginx-install && ./sbin/nginx
 
 nginx-install: nginx-${NGINX_VERSION} openssl-${OPENSSL_VERSION} pcre2-${PCRE2_VERSION} zlib-${ZLIB_VERSION}
 	cd nginx-${NGINX_VERSION} && ./configure \
 	--prefix=../nginx-install \
 	--with-pcre=../pcre2-${PCRE2_VERSION} \
-	--with-openssl=../openssl-${PCRE2_VERSION} \
+	--with-openssl=../openssl-${OPENSSL_VERSION} \
 	--with-zlib=../zlib-${ZLIB_VERSION} \
+	--with-compat \
+    --with-http_addition_module \
+    --with-http_auth_request_module \
+    --with-http_flv_module \
+    --with-http_gunzip_module \
+    --with-http_gzip_static_module \
+    --with-http_random_index_module \
+    --with-http_realip_module \
+    --with-http_secure_link_module \
+    --with-http_slice_module \
+    --with-http_slice_module \
+    --with-http_ssl_module \
+    --with-http_stub_status_module \
+    --with-http_sub_module \
+    --with-http_v2_module \
+    --with-stream_realip_module \
+    --with-stream_ssl_module \
+    --with-stream_ssl_preread_module \
+    --with-stream \
+    --with-threads \
+	--with-file-aio \
+    "--with-cc-opt=-g -fstack-protector-strong -Wformat -Werror=format-security -Wp,-D_FORTIFY_SOURCE=2 -fPIC" \
+    "--with-ld-opt=-Wl,-Bsymbolic-functions -Wl,-z,relro -Wl,-z,now -Wl,--as-needed -pie" \
 	&& make install
 
 nginx-${NGINX_VERSION}:

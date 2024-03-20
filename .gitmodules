@@ -1,0 +1,3 @@
+[submodule "ngx-rust"]
+	path = ngx-rust
+	url = https://github.com/willnode/ngx-rust

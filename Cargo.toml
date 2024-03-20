@@ -13,4 +13,4 @@ path = "summon.rs"
 crate-type   = ["rlib", "cdylib"]
 
 [patch.crates-io]
-ngx = { git = "https://github.com/nginxinc/ngx-rust", rev = "b08a9ee7a2bf9518acb1dac22fa3d241023047e5"}
+ngx = { path = "./ngx-rust" }

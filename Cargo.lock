@@ -267,7 +267,6 @@ dependencies = [
 [[package]]
 name = "nginx-sys"
 version = "0.5.0"
-source = "git+https://github.com/nginxinc/ngx-rust?rev=b08a9ee7a2bf9518acb1dac22fa3d241023047e5#b08a9ee7a2bf9518acb1dac22fa3d241023047e5"
 dependencies = [
  "bindgen",
  "duct",
@@ -280,7 +279,6 @@ dependencies = [
 [[package]]
 name = "ngx"
 version = "0.5.0"
-source = "git+https://github.com/nginxinc/ngx-rust?rev=b08a9ee7a2bf9518acb1dac22fa3d241023047e5#b08a9ee7a2bf9518acb1dac22fa3d241023047e5"
 dependencies = [
  "nginx-sys",
 ]
