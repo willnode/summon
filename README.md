@@ -3,7 +3,7 @@
 
 A simple NGINX module to launch any program and forward HTTP requests to it.
 
-Not yet ready for production.
+Not yet ready for production. Primilarity built for [DOM Cloud](https://domcloud.co).
 
 ## Installation and Running Demo
 
@@ -20,6 +20,8 @@ make run
 **Required to activate summon module.**
 
 Run app at `<cmd>`. App must listen to `PORT` envar.
+
+Use `proxy_pass http://localhost:$summon_port` to forward HTTP requests.
 
 #### `summon_app_root <path>`
 
