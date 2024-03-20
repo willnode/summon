@@ -1,5 +1,5 @@
 [package]
-name = "summon"
+name = "summonapp"
 version = "0.1.0"
 edition = "2021"
 
@@ -8,8 +8,7 @@ lazy_static = "1.4.0"
 ngx = "0.5.0"
 
 [lib]
-name = "summon"
-path = "summon.rs"
+name = "summonapp"
 crate-type   = ["rlib", "cdylib"]
 
 [patch.crates-io]

@@ -2,7 +2,7 @@ NGINX_VERSION=1.22.1
 PCRE2_VERSION=10.39
 ZLIB_VERSION=1.3.1
 OPENSSL_VERSION=3.2.0
-# Build the Docker image
+
 .PHONY: build
 build:
 	PCRE2_VERSION=${PCRE2_VERSION} \
@@ -10,12 +10,12 @@ build:
 	NGX_VERSION=${NGINX_VERSION} \
 	ZLIB_VERSION=${ZLIB_VERSION} \
 	cargo build
-	cp target/debug/libsummon.so nginx-install/modules/libsummon.so
+	cp target/debug/libsummonapp.so nginx-install/modules/libsummonapp.so
 
-.PHONY: test
-test: nginx-install
+.PHONY: run
+run: nginx-install
 	cp ./test/nginx.conf ./nginx-install/conf/nginx.conf
-	cd ./nginx-install && ./sbin/nginx
+	cd ./nginx-install && export RUST_BACKTRACE=1 && ./sbin/nginx
 
 nginx-install: nginx-${NGINX_VERSION} openssl-${OPENSSL_VERSION} pcre2-${PCRE2_VERSION} zlib-${ZLIB_VERSION}
 	cd nginx-${NGINX_VERSION} && ./configure \
@@ -24,29 +24,30 @@ nginx-install: nginx-${NGINX_VERSION} openssl-${OPENSSL_VERSION} pcre2-${PCRE2_V
 	--with-openssl=../openssl-${OPENSSL_VERSION} \
 	--with-zlib=../zlib-${ZLIB_VERSION} \
 	--with-compat \
-    --with-http_addition_module \
-    --with-http_auth_request_module \
-    --with-http_flv_module \
-    --with-http_gunzip_module \
-    --with-http_gzip_static_module \
-    --with-http_random_index_module \
-    --with-http_realip_module \
-    --with-http_secure_link_module \
-    --with-http_slice_module \
-    --with-http_slice_module \
-    --with-http_ssl_module \
-    --with-http_stub_status_module \
-    --with-http_sub_module \
-    --with-http_v2_module \
-    --with-stream_realip_module \
-    --with-stream_ssl_module \
-    --with-stream_ssl_preread_module \
-    --with-stream \
-    --with-threads \
+	--with-http_addition_module \
+	--with-http_auth_request_module \
+	--with-http_flv_module \
+	--with-http_gunzip_module \
+	--with-http_gzip_static_module \
+	--with-http_random_index_module \
+	--with-http_realip_module \
+	--with-http_secure_link_module \
+	--with-http_slice_module \
+	--with-http_slice_module \
+	--with-http_ssl_module \
+	--with-http_stub_status_module \
+	--with-http_sub_module \
+	--with-http_v2_module \
+	--with-stream_realip_module \
+	--with-stream_ssl_module \
+	--with-stream_ssl_preread_module \
+	--with-stream \
+	--with-threads \
 	--with-file-aio \
-    "--with-cc-opt=-g -fstack-protector-strong -Wformat -Werror=format-security -Wp,-D_FORTIFY_SOURCE=2 -fPIC" \
-    "--with-ld-opt=-Wl,-Bsymbolic-functions -Wl,-z,relro -Wl,-z,now -Wl,--as-needed -pie" \
+	"--with-cc-opt=-g -fstack-protector-strong -Wformat -Werror=format-security -Wp,-D_FORTIFY_SOURCE=2 -fPIC" \
+	"--with-ld-opt=-Wl,-Bsymbolic-functions -Wl,-z,relro -Wl,-z,now -Wl,--as-needed -pie" \
 	&& make install
+	mkdir -p nginx-install/modules
 
 nginx-${NGINX_VERSION}:
 	wget http://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz
