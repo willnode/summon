@@ -13,6 +13,7 @@ use ngx::ffi::{
     ngx_http_request_t, ngx_http_variable_t, ngx_int_t, ngx_module_t, ngx_uint_t,
     ngx_variable_value_t, NGX_DECLINED, NGX_HTTP_MODULE, NGX_OK, NGX_RS_MODULE_SIGNATURE,
 };
+use std::fmt::format;
 use std::thread::sleep;
 use ngx::http::{MergeConfigError, Request};
 use ngx::{core, core::Status, http, http::HTTPModule};
@@ -151,8 +152,9 @@ fn get_or_spawn_process(request: &http::Request, host: &str, co: &ModuleConfig) 
         return NGX_OK;
     }
 
+    let prockey = format!("{}:{}", host, co.command);
     let lock = GLOBAL_PROCESSES.lock().unwrap();
-    if let Some(ctx) = lock.get(host) {
+    if let Some(ctx) = lock.get(&prockey) {
         if is_process_running(ctx.pid.into()) {
             unsafe {
                 (*new_ctx).save(ctx.pid, ctx.port, &mut request.pool());
@@ -214,7 +216,7 @@ fn get_or_spawn_process(request: &http::Request, host: &str, co: &ModuleConfig) 
         request.set_module_ctx(new_ctx as *mut c_void, &ngx_http_summonapp_module);
     };
     let mut lock = GLOBAL_PROCESSES.lock().unwrap();
-    lock.insert(host.to_string(), SafeModuleCtx{
+    lock.insert(prockey, SafeModuleCtx{
         pid: pid,
         port: port,
     });
