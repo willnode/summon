@@ -130,7 +130,7 @@ pub fn get_host(request: &Request) -> Option<&NgxStr> {
 }
 
 lazy_static! {
-    static ref GLOBAL_PROCESSES: Mutex<HashMap<String, Arc<Mutex<Child>>>> =
+    static ref GLOBAL_PROCESSES: Mutex<HashMap<String, SafeModuleCtx>> =
         Mutex::new(HashMap::new());
 }
 
@@ -141,21 +141,31 @@ fn is_process_running(d: sysinfo::Pid) -> bool {
     system.process(d).is_some()
 }
 
-fn get_or_spawn_process(request: &http::Request, co: &ModuleConfig) -> u32 {
-    if let Some(ctx) = unsafe { request.get_module_ctx::<ModuleCtx>(&ngx_http_summonapp_module) } {
-        if is_process_running(ctx.pid.into()) {
-            return NGX_OK;
-        }
-    }
 
-    let port = find_free_port().expect("Unable to get free port");
-    ngx_log_debug_http!(request, "spawning at port {}: '{}'", port, co.command);
-
+fn get_or_spawn_process(request: &http::Request, host: &str, co: &ModuleConfig) -> u32 {
     let new_ctx = request.pool().allocate::<ModuleCtx>(Default::default());
 
     if new_ctx.is_null() {
         return NGX_OK;
     }
+
+    let lock = GLOBAL_PROCESSES.lock().unwrap();
+    if let Some(ctx) = lock.get(host) {
+        if is_process_running(ctx.pid.into()) {
+            unsafe {
+                (*new_ctx).save(ctx.pid, ctx.port, &mut request.pool());
+                request.set_module_ctx(new_ctx as *mut c_void, &ngx_http_summonapp_module);
+            };
+            return NGX_OK;
+        }
+        ngx_log_debug_http!(request, "process is dead {}", ctx.pid);
+    }
+    drop(lock);
+
+    let port = find_free_port().expect("Unable to get free port");
+    ngx_log_debug_http!(request, "spawning at port {}: '{}'", port, co.command);
+
+
 
     // Command to run should be adjusted according to your actual command.
     let mut childp = Command::new("/bin/bash");
@@ -165,25 +175,42 @@ fn get_or_spawn_process(request: &http::Request, co: &ModuleConfig) -> u32 {
     childp
         .args(&["-c", &fcmd])
         .env("HOME", format!("/home/{}", co.user))
-    .env("PORT", port.to_string());
+        .env("PORT", port.to_string());
 
     ngx_log_debug_http!(request, "env cmd: {:#?}", fcmd);
 
     let child = childp.spawn().expect("Failed to spawn process");
+    let pid = usize::try_from(child.id()).unwrap();
 
     unsafe {
-        (*new_ctx).save(child.id(), port, &mut request.pool());
+        (*new_ctx).save(pid, port, &mut request.pool());
         request.set_module_ctx(new_ctx as *mut c_void, &ngx_http_summonapp_module);
     };
+    let mut lock = GLOBAL_PROCESSES.lock().unwrap();
+    lock.insert(host.to_string(), SafeModuleCtx{
+        pid: pid,
+        port: port,
+    });
+    drop(lock);
+    ngx_log_debug_http!(request, "eenv saved");
+
     NGX_OK
 }
 
 http_request_handler!(summon_app_access_handler, |request: &mut http::Request| {
     let co = unsafe { request.get_module_loc_conf::<ModuleConfig>(&ngx_http_summonapp_module) };
     let co = co.expect("module config is none");
-    get_or_spawn_process(request, co);
-
-    core::Status::NGX_DONE
+    let host = get_host(request);
+    if co.user != "" && co.command != "" {
+        if let Some(h) = host {
+            get_or_spawn_process(request, h.to_str().unwrap(), co);
+            core::Status::NGX_OK
+        } else {
+            core::Status::NGX_DECLINED
+        }
+    } else {
+        core::Status::NGX_DECLINED
+    }
 });
 
 #[no_mangle]
@@ -202,14 +229,17 @@ static mut ngx_http_summonapp_vars: [ngx_http_variable_t; 2] = [
 http_variable_get!(
     ngx_http_summonapp_port_variable,
     |request: &mut http::Request, v: *mut ngx_variable_value_t, _: usize| {
+        ngx_log_debug_http!(request, "summon: aaaaaaaaa");
         let ctx = unsafe { request.get_module_ctx::<ModuleCtx>(&ngx_http_summonapp_module) };
 
         if let Some(obj) = ctx {
-            ngx_log_debug_http!(request, "httporigdst: found context and binding variable");
+            ngx_log_debug_http!(request, "summon: found port {}", obj.port.to_string());
             obj.bind_port(v);
             return core::Status::NGX_OK;
         }
-        core::Status::NGX_OK
+        ngx_log_debug_http!(request, "summon: no found context");
+
+        core::Status::NGX_ERROR
     }
 );
 

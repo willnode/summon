@@ -23,6 +23,12 @@ pub struct ModuleCtx {
     pub port: ngx_str_t,
 }
 
+#[derive(Debug)]
+pub struct SafeModuleCtx {
+    pub pid: usize,
+    pub port: u16,
+}
+
 
 impl Default for ModuleCtx {
     fn default() -> ModuleCtx {
@@ -35,8 +41,8 @@ impl Default for ModuleCtx {
 
 
 impl ModuleCtx {
-    pub fn save(&mut self, pid: u32, port: in_port_t, pool: &mut core::Pool) -> core::Status {
-        self.pid = usize::try_from(pid).unwrap();
+    pub fn save(&mut self, pid: usize, port: in_port_t, pool: &mut core::Pool) -> core::Status {
+        self.pid = pid;
         let port_str = port.to_string();
         let port_data = pool.alloc(port_str.len());
         if port_data.is_null() {
