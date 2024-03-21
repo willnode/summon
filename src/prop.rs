@@ -1,3 +1,4 @@
+use crate::utils::{parse_duration_to_seconds, parse_on_off_to_bool};
 use crate::ModuleConfig;
 use std::os::raw::{c_char, c_void};
 use ngx::{ngx_null_command, ngx_string};
@@ -160,9 +161,9 @@ pub extern "C" fn ngx_http_summon_app_set_idle_timeout(
         let conf = &mut *(conf as *mut ModuleConfig);
         let args = (*(*cf).args).elts as *mut ngx_str_t;
 
-        let val = (*args.add(1)).to_str();
+        let val = (*args.add(1)).to_str() as &str;
 
-        conf.idle_timeout = val.to_string();
+        conf.idle_timeout = parse_duration_to_seconds(val).unwrap_or(60 * 15);
     };
 
     std::ptr::null_mut()
@@ -179,9 +180,9 @@ pub extern "C" fn ngx_http_summon_app_set_min_instance(
         let conf = &mut *(conf as *mut ModuleConfig);
         let args = (*(*cf).args).elts as *mut ngx_str_t;
 
-        let val = (*args.add(1)).to_str();
+        let val = (*args.add(1)).to_str() as &str;
 
-        conf.min_instance = val.to_string();
+        conf.min_instance = val.parse().unwrap_or(1);
     };
 
     std::ptr::null_mut()
@@ -197,9 +198,9 @@ pub extern "C" fn ngx_http_summon_app_set_use_port(
         let conf = &mut *(conf as *mut ModuleConfig);
         let args = (*(*cf).args).elts as *mut ngx_str_t;
 
-        let val = (*args.add(1)).to_str();
+        let val = (*args.add(1)).to_str() as &str;
 
-        conf.use_port = val.to_string();
+        conf.use_port = val.parse().unwrap_or(0);
     };
 
     std::ptr::null_mut()
@@ -215,9 +216,9 @@ pub extern "C" fn ngx_http_summon_app_set_show_crash(
         let conf = &mut *(conf as *mut ModuleConfig);
         let args = (*(*cf).args).elts as *mut ngx_str_t;
 
-        let val = (*args.add(1)).to_str();
+        let val = (*args.add(1)).to_str() as &str;
 
-        conf.show_crash = val.to_string();
+        conf.show_crash = parse_on_off_to_bool(val).unwrap_or(false);
     };
 
     std::ptr::null_mut()

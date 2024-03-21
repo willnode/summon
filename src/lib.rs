@@ -1,33 +1,31 @@
+mod mem;
 mod prop;
+mod timer;
 mod types;
+mod utils;
 
 use prop::*;
 use sysinfo::System;
+use timer::idling_killer;
 use types::*;
 
-use lazy_static::lazy_static;
-use ngx::core::NgxStr;
 use ngx::ffi::{
     nginx_version, ngx_array_push, ngx_conf_t, ngx_http_add_variable, ngx_http_core_module,
     ngx_http_handler_pt, ngx_http_module_t, ngx_http_phases_NGX_HTTP_ACCESS_PHASE,
     ngx_http_request_t, ngx_http_variable_t, ngx_int_t, ngx_module_t, ngx_uint_t,
-    ngx_variable_value_t, NGX_DECLINED, NGX_HTTP_MODULE, NGX_OK, NGX_RS_MODULE_SIGNATURE,
+    ngx_variable_value_t, NGX_HTTP_MODULE, NGX_OK, NGX_RS_MODULE_SIGNATURE,
 };
-use std::fmt::format;
-use std::thread::sleep;
-use ngx::http::{MergeConfigError, Request};
+use utils::{get_host, spawn_once};
+use ngx::http::MergeConfigError;
 use ngx::{core, core::Status, http, http::HTTPModule};
 use ngx::{
     http_request_handler, http_variable_get, ngx_http_null_variable, ngx_log_debug_http,
     ngx_modules, ngx_string,
 };
-use std::collections::HashMap;
-use std::env;
-use std::net::{SocketAddr, TcpListener, TcpStream, ToSocketAddrs};
 use std::os::raw::{c_char, c_void};
-use std::process::{Child, Command};
-use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+
+use crate::mem::GLOBAL_PROCESSES;
+use crate::utils::{find_free_port, now_timestamp, spawn_process, wait_for_connection};
 
 impl http::HTTPModule for Module {
     type MainConf = ();
@@ -59,10 +57,9 @@ impl http::HTTPModule for Module {
         if h.is_null() {
             return core::Status::NGX_ERROR.into();
         }
+
         // set an Access phase handler
         *h = Some(summon_app_access_handler);
-
-        env::set_var("RUST_BACKTRACE", "1");
 
         core::Status::NGX_OK.into()
     }
@@ -120,22 +117,6 @@ impl http::Merge for ModuleConfig {
     }
 }
 
-pub fn get_host(request: &Request) -> Option<&NgxStr> {
-    if !request.get_inner().headers_in.user_agent.is_null() {
-        unsafe {
-            Some(NgxStr::from_ngx_str(
-                (*request.get_inner().headers_in.host).value,
-            ))
-        }
-    } else {
-        None
-    }
-}
-
-lazy_static! {
-    static ref GLOBAL_PROCESSES: Mutex<HashMap<String, SafeModuleCtx>> =
-        Mutex::new(HashMap::new());
-}
 
 fn is_process_running(d: sysinfo::Pid) -> bool {
     let mut system = System::new_all();
@@ -146,82 +127,46 @@ fn is_process_running(d: sysinfo::Pid) -> bool {
 
 
 fn get_or_spawn_process(request: &http::Request, host: &str, co: &ModuleConfig) -> u32 {
-    let new_ctx = request.pool().allocate::<ModuleCtx>(Default::default());
+    let new_ctx = request.pool().allocate::<NgxModuleCtx>(Default::default());
 
     if new_ctx.is_null() {
         return NGX_OK;
     }
 
+    spawn_once(idling_killer);
+
     let prockey = format!("{}:{}", host, co.command);
-    let lock = GLOBAL_PROCESSES.lock().unwrap();
-    if let Some(ctx) = lock.get(&prockey) {
+    if let Some(mut ctx) = GLOBAL_PROCESSES.get_mut(&prockey) {
+        // eprintln!("Killerfew examiane {:?}, {:?}", GLOBAL_PROCESSES.len(), ctx);
         if is_process_running(ctx.pid.into()) {
             unsafe {
-                (*new_ctx).save(ctx.pid, ctx.port, &mut request.pool());
+                (*new_ctx).save(ctx.port, &mut request.pool());
                 request.set_module_ctx(new_ctx as *mut c_void, &ngx_http_summonapp_module);
             };
+            ctx.lastreq = now_timestamp();
             return NGX_OK;
         }
         ngx_log_debug_http!(request, "process is dead {}", ctx.pid);
+        drop(ctx);
     }
-    drop(lock);
 
     let port = find_free_port().expect("Unable to get free port");
-    ngx_log_debug_http!(request, "spawning at port {}: '{}'", port, co.command);
+    ngx_log_debug_http!(request, "spawning at port {}: '{}'", port, prockey);
 
+    let pid = spawn_process(co, port, request);
 
-
-    // Command to run should be adjusted according to your actual command.
-    let mut childp = Command::new("/bin/bash");
-
-    let fcmd = format!("source /etc/profile ; source ~/.profile ; {}", co.command);
-
-    childp
-        .args(&["-c", &fcmd])
-        .env("HOME", format!("/home/{}", co.user))
-        .env("PORT", port.to_string());
-
-    ngx_log_debug_http!(request, "env cmd: {:#?}", fcmd);
-
-    let child = childp.spawn().expect("Failed to spawn process");
-    let pid = usize::try_from(child.id()).unwrap();
-
-    let addr = format!("127.0.0.1:{}", port)
-        .to_socket_addrs()
-        .expect("Unable to resolve domain")
-        .next()
-        .expect("Unable to resolve address");
-
-    let timeout = Duration::from_secs(30);
-    let start_time = Instant::now();
-
-    loop {
-        match TcpStream::connect_timeout(&addr, Duration::from_secs(2)) {
-            Ok(_) => {
-                ngx_log_debug_http!(request, "Successfully connected to {}:{}", host, port);
-                break;
-            }
-            Err(e) => {
-                if start_time.elapsed() > timeout {
-                    println!("Failed to connect within {:?}: {}", timeout, e);
-                    break;
-                }
-                sleep(Duration::from_millis(500));
-            }
-        }
-    }
+    wait_for_connection(port, request, host);
 
     unsafe {
-        (*new_ctx).save(pid, port, &mut request.pool());
+        (*new_ctx).save(port, &mut request.pool());
         request.set_module_ctx(new_ctx as *mut c_void, &ngx_http_summonapp_module);
     };
-    let mut lock = GLOBAL_PROCESSES.lock().unwrap();
-    lock.insert(prockey, SafeModuleCtx{
-        pid: pid,
-        port: port,
+    GLOBAL_PROCESSES.insert(prockey, SafeModuleCtx{
+        pid,
+        port,
+        timeout: co.idle_timeout,
+        lastreq: now_timestamp(),
     });
-    drop(lock);
-    ngx_log_debug_http!(request, "eenv saved");
 
     NGX_OK
 }
@@ -258,7 +203,7 @@ static mut ngx_http_summonapp_vars: [ngx_http_variable_t; 2] = [
 http_variable_get!(
     ngx_http_summonapp_port_variable,
     |request: &mut http::Request, v: *mut ngx_variable_value_t, _: usize| {
-        let ctx = unsafe { request.get_module_ctx::<ModuleCtx>(&ngx_http_summonapp_module) };
+        let ctx = unsafe { request.get_module_ctx::<NgxModuleCtx>(&ngx_http_summonapp_module) };
 
         if let Some(obj) = ctx {
             ngx_log_debug_http!(request, "summon: found port {}", obj.port.to_string());
@@ -271,13 +216,3 @@ http_variable_get!(
     }
 );
 
-fn find_free_port() -> Result<u16, std::io::Error> {
-    // Bind to port 0; the OS will assign a free port
-    let listener = TcpListener::bind("127.0.0.1:0")?;
-
-    // Retrieve the assigned port
-    match listener.local_addr()? {
-        SocketAddr::V4(addr) => Ok(addr.port()),
-        SocketAddr::V6(addr) => Ok(addr.port()),
-    }
-}
