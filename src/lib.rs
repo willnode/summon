@@ -13,6 +13,7 @@ use ngx::ffi::{
     ngx_http_request_t, ngx_http_variable_t, ngx_int_t, ngx_module_t, ngx_uint_t,
     ngx_variable_value_t, NGX_DECLINED, NGX_HTTP_MODULE, NGX_OK, NGX_RS_MODULE_SIGNATURE,
 };
+use std::thread::sleep;
 use ngx::http::{MergeConfigError, Request};
 use ngx::{core, core::Status, http, http::HTTPModule};
 use ngx::{
@@ -21,10 +22,11 @@ use ngx::{
 };
 use std::collections::HashMap;
 use std::env;
-use std::net::{SocketAddr, TcpListener};
+use std::net::{SocketAddr, TcpListener, TcpStream, ToSocketAddrs};
 use std::os::raw::{c_char, c_void};
 use std::process::{Child, Command};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 impl http::HTTPModule for Module {
     type MainConf = ();
@@ -182,6 +184,31 @@ fn get_or_spawn_process(request: &http::Request, host: &str, co: &ModuleConfig) 
     let child = childp.spawn().expect("Failed to spawn process");
     let pid = usize::try_from(child.id()).unwrap();
 
+    let addr = format!("127.0.0.1:{}", port)
+        .to_socket_addrs()
+        .expect("Unable to resolve domain")
+        .next()
+        .expect("Unable to resolve address");
+
+    let timeout = Duration::from_secs(30);
+    let start_time = Instant::now();
+
+    loop {
+        match TcpStream::connect_timeout(&addr, Duration::from_secs(2)) {
+            Ok(_) => {
+                ngx_log_debug_http!(request, "Successfully connected to {}:{}", host, port);
+                break;
+            }
+            Err(e) => {
+                if start_time.elapsed() > timeout {
+                    println!("Failed to connect within {:?}: {}", timeout, e);
+                    break;
+                }
+                sleep(Duration::from_millis(500));
+            }
+        }
+    }
+
     unsafe {
         (*new_ctx).save(pid, port, &mut request.pool());
         request.set_module_ctx(new_ctx as *mut c_void, &ngx_http_summonapp_module);
@@ -229,7 +256,6 @@ static mut ngx_http_summonapp_vars: [ngx_http_variable_t; 2] = [
 http_variable_get!(
     ngx_http_summonapp_port_variable,
     |request: &mut http::Request, v: *mut ngx_variable_value_t, _: usize| {
-        ngx_log_debug_http!(request, "summon: aaaaaaaaa");
         let ctx = unsafe { request.get_module_ctx::<ModuleCtx>(&ngx_http_summonapp_module) };
 
         if let Some(obj) = ctx {
